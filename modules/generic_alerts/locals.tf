@@ -1,14 +1,60 @@
 # Local values defining reusable maps and filtering logic for alert rules
 locals {
   #----------------------------------------------------------------------#
+  # Alert type definitions — display name, description, summary,        #
+  # and severity for each generic alert. Referenced in main.tf for      #
+  # rule naming, annotations, and labels.                               #
+  # To add a new alert type: add an entry here, add matching query      #
+  # entries in the `queries` map below, and add a threshold in `exprs`. #
+  #----------------------------------------------------------------------#
+  alert_types = {
+    cpu = {
+      display_name = "CPU Usage is Critical!"
+      description  = "When CPU usage becomes critical it may cause a system failure, it's better to check server's processes, a restart can help."
+      summary      = "Server's CPU is at critical level!"
+      severity     = "High"
+    }
+    memory = {
+      display_name = "Memory Usage is Critical!"
+      description  = "When Memory usage becomes critical it may cause a system failure, it's better to check server's background processes, a restart can help."
+      summary      = "Server's Memory percent is at critical level!"
+      severity     = "Critical"
+    }
+    storage = {
+      display_name = "Storage is Almost full!"
+      description  = "Full storage will mostly affect the repository server, may cause CI/CD pipelines to fail. Clear the trash can or run garbage collection."
+      summary      = "Server's Hard Disk is full!"
+      severity     = "Critical"
+    }
+    cert_exp = {
+      display_name = "Certificate is almost expired!"
+      description  = "When system's certificate is expired, users can't access the system from browser, also may cause pipelines failure. Please update the certificate."
+      summary      = "There are less than 14 days left until system's certificate is expired!"
+      severity     = "High"
+    }
+    backup = {
+      display_name = "Backup failed!"
+      description  = "Backup is one of the most important processes on our systems, first, check the backup network folder then the script, then the cronjob."
+      summary      = "The system isn't backing up!"
+      severity     = "High"
+    }
+    state = {
+      display_name = "System is Down!"
+      description  = "The system is down lol, go do something, you shouldn't read this at all. (Try to restart maybe)"
+      summary      = "The system is down, users can't access it"
+      severity     = "Critical"
+    }
+  }
+
+  #----------------------------------------------------------------------#
   # Flatten all alert rules into a map keyed by "serverName|alertKey"   #
   # Each entry holds the server object, alert key, and display name,    #
-  # then filters out combinations that are skipped per-server flags.    #
+  # then filters out combinations excluded by per-server skip flags.    #
   #----------------------------------------------------------------------#
   alert_rule_pairs = {
     for pair_key, pair_value in merge([
       for srv in var.servers : {
-        for alert_key, alert_obj in var.alert_types :
+        for alert_key, alert_obj in local.alert_types :
           "${srv.name}|${alert_key}" => {
             server     = srv
             alert_key  = alert_key
@@ -28,40 +74,40 @@ locals {
   # PromQL queries per OS and alert type.                                #
   # __IP__ is a placeholder replaced at apply-time with the real        #
   # server IP (or URL for cert_exp/state) — see main.tf model field.    #
-  # These JSON strings are copied from Grafana's Terraform export        #
-  # (see README: "How to Get Query and Expression Strings").             #
+  # Paste the `model` value from Grafana's Terraform export here.       #
+  # See README: "How to Get Query and Expression Strings".              #
   #----------------------------------------------------------------------#
   queries = {
     linux = {
-      cpu      = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"(((count(count(node_cpu_seconds_total{instance=\\\"__IP__\\\"}) by (cpu))) - avg sum by (mode)(irate(node_cpu_seconds_total{instance=\\\"__IP__\\\",mode=\\\"idle\\\"}[5m]))) / count(count(node_cpu_seconds_total{instance=\\\"__IP__\\\"}) by (cpu))) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      memory   = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"100 - (node_memory_MemAvailable_bytes{instance=\\\"__IP__\\\"} / node_memory_MemTotal_bytes{instance=\\\"__IP__\\\"}) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      storage  = "{\"editorMode\":\"code\",\"expr\":\"100 - (node_filesystem_avail_bytes{instance=\\\"__IP__\\\", mountpoint=\\\"/\\\"} / node_filesystem_size_bytes{instance=\\\"__IP__\\\", mountpoint=\\\"/\\\"}) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      cert_exp = "{\"editorMode\":\"code\",\"expr\":\"(probe_ssl_earliest_cert_expiry{instance=\\\"__IP__\\\"} - time()) / 3600 / 24\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      backup   = "{\"editorMode\":\"code\",\"expr\":\"backup_success_status{instance=\\\"__IP__\\\"}\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      state    = "{\"editorMode\":\"code\",\"expr\":\"probe_success{instance=\\\"__IP__\\\"}\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
+      cpu      = "<linux-cpu-query-from-grafana-export>"
+      memory   = "<linux-memory-query-from-grafana-export>"
+      storage  = "<linux-storage-query-from-grafana-export>"
+      cert_exp = "<linux-cert-exp-query-from-grafana-export>"
+      backup   = "<linux-backup-query-from-grafana-export>"
+      state    = "<linux-state-query-from-grafana-export>"
     }
     windows = {
-      cpu      = "{\"editorMode\":\"code\",\"expr\":\"100 - (avg by (instance) (irate(windows_cpu_time_total{mode=\\\"idle\\\", instance=\\\"__IP__\\\"}[5m]))) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      memory   = "{\"editorMode\":\"code\",\"expr\":\"100 - (windows_os_physical_memory_free_bytes{instance=\\\"__IP__\\\"} / windows_cs_physical_memory_bytes{instance=\\\"__IP__\\\"}) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      storage  = "{\"disableTextWrap\":false,\"editorMode\":\"code\",\"expr\":\"100 - (windows_logical_disk_free_bytes{instance=\\\"__IP__\\\",volume=\\\"C:\\\\\\\\\"} / windows_logical_disk_size_bytes{instance=\\\"__IP__\\\",volume=\\\"C:\\\\\\\\\"}) * 100\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      cert_exp = "{\"editorMode\":\"code\",\"expr\":\"(probe_ssl_earliest_cert_expiry{instance=\\\"__IP__\\\"} - time()) / 3600 / 24\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      backup   = "{\"editorMode\":\"code\",\"expr\":\"backup_success_status{instance=\\\"__IP__\\\"}\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-      state    = "{\"editorMode\":\"code\",\"expr\":\"probe_success{instance=\\\"__IP__\\\"}\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
+      cpu      = "<windows-cpu-query-from-grafana-export>"
+      memory   = "<windows-memory-query-from-grafana-export>"
+      storage  = "<windows-storage-query-from-grafana-export>"
+      cert_exp = "<windows-cert-exp-query-from-grafana-export>"
+      backup   = "<windows-backup-query-from-grafana-export>"
+      state    = "<windows-state-query-from-grafana-export>"
     }
   }
 
   #----------------------------------------------------------------------#
   # Threshold expressions for ref_id "B" — evaluate the query result.   #
-  # These are also copied from Grafana's Terraform export.               #
+  # Paste the `model` from the second data block of Grafana's export.   #
   # Thresholds: cpu/memory/storage > 95%, cert_exp < 14 days,           #
-  # backup/state < 1 (i.e. 0 = failed/down).                            #
+  # backup/state < 1 (0 = failed/down).                                 #
   #----------------------------------------------------------------------#
   exprs = {
-    cpu      = "{\"conditions\":[{\"evaluator\":{\"params\":[95,0],\"type\":\"gt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
-    memory   = "{\"conditions\":[{\"evaluator\":{\"params\":[95,0],\"type\":\"gt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
-    storage  = "{\"conditions\":[{\"evaluator\":{\"params\":[95,0],\"type\":\"gt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
-    cert_exp = "{\"conditions\":[{\"evaluator\":{\"params\":[14,0],\"type\":\"lt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
-    backup   = "{\"conditions\":[{\"evaluator\":{\"params\":[1,0],\"type\":\"lt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
-    state    = "{\"conditions\":[{\"evaluator\":{\"params\":[1,0],\"type\":\"lt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
+    cpu      = "<cpu-threshold-expr-from-grafana-export>"
+    memory   = "<memory-threshold-expr-from-grafana-export>"
+    storage  = "<storage-threshold-expr-from-grafana-export>"
+    cert_exp = "<cert-exp-threshold-expr-from-grafana-export>"
+    backup   = "<backup-threshold-expr-from-grafana-export>"
+    state    = "<state-threshold-expr-from-grafana-export>"
   }
 }

@@ -65,9 +65,9 @@ specific_alert_types = {
         description  = "An example specific alert for demonstration. Customize this for your needs."
         summary      = "Example service is not running."
         severity     = "Critical"
-        # Instance value must be __IP__ — replaced with server.ip at apply-time
-        query = "{\"editorMode\":\"code\",\"expr\":\"windows_service_state{name=\\\"example-service\\\",state=\\\"running\\\",instance=\\\"__IP__\\\"}\",\"instant\":true,\"intervalMs\":1000,\"legendFormat\":\"__auto\",\"range\":false,\"refId\":\"A\"}"
-        expr  = "{\"conditions\":[{\"evaluator\":{\"params\":[1,0],\"type\":\"lt\"},\"operator\":{\"type\":\"and\"},\"query\":{\"params\":[\"A\"]},\"reducer\":{\"params\":[],\"type\":\"last\"},\"type\":\"query\"}],\"dataSource\":\"__expr__\",\"expression\":\"A\",\"hide\":false,\"refId\":\"B\",\"type\":\"classic_conditions\"}"
+        # Paste the model from Grafana's Terraform export — replace the instance value with __IP__
+        query = "<query-from-grafana-export>"
+        expr  = "<expr-from-grafana-export>"
       }
     }
   }

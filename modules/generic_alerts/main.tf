@@ -50,13 +50,13 @@ resource "grafana_rule_group" "generic_group" {
       exec_err_state = "Error"
 
       annotations = {
-        description = var.alert_types[rule.value.alert_key].description
-        summary     = var.alert_types[rule.value.alert_key].summary
+        description = local.alert_types[rule.value.alert_key].description
+        summary     = local.alert_types[rule.value.alert_key].summary
       }
 
       labels = {
         instance  = rule.value.server.name
-        severity  = var.alert_types[rule.value.alert_key].severity
+        severity  = local.alert_types[rule.value.alert_key].severity
         alertname = "${rule.value.server.name} - ${rule.value.alert_name}"
       }
 

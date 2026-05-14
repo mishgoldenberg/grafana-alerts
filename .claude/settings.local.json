@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git init *)",
+      "Bash(Get-ChildItem -Recurse \"c:\\\\Users\\\\golde\\\\Documents\\\\grafana-alerts\")",
+      "Bash(Select-Object FullName)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\golde\\\\Documents\\\\grafana-alerts\\\\modules\\\\generic_alerts\")",
+      "Bash(mkdir -p \"c:\\\\Users\\\\golde\\\\Documents\\\\grafana-alerts\\\\modules\\\\specific_alerts\")"
+    ]
+  }
+}
