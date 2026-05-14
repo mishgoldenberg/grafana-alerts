@@ -1,30 +1,38 @@
 variable "system_name" {
   type        = string
-  description = "Why would you read this, system name is a system name, You don't need a description for that"
+  description = "Name of the monitored system, used to name the alert group"
 }
 
 variable "os" {
   type        = string
-  description = "Type of Operational System our servers have"
+  description = "Operating system type: 'linux' or 'windows' — selects the correct PromQL queries"
+}
+
+variable "folder_uid" {
+  type        = string
+  description = "UID of the Grafana folder where alert groups will be created"
 }
 
 variable "servers" {
   type = list(object({
-    name = string
-    ip   = string
-    url  = string
+    name        = string
+    ip          = string
+    url         = string
+    skip_backup = optional(bool, false) # Set true for servers that don't run backups
+    skip_cert   = optional(bool, false) # Set true for servers without a TLS certificate
+    skip_state  = optional(bool, false) # Set true for servers that don't need uptime monitoring
   }))
-  description = "Each of our systems' servers (Like AT, DT, S3, Test, Prod, and etc)"
+  description = "List of servers belonging to this system"
 }
 
 variable "datasource_uid" {
   type        = string
-  description = "The UID of the Prometheus (or other) datasource"
+  description = "UID of the Prometheus (or Mimir) datasource in Grafana"
 }
 
 variable "contact_point_name" {
   type        = string
-  description = "The name of the existing contact point to use in rules"
+  description = "Name of the Grafana contact point to route alerts to"
 }
 
 variable "alert_types" {
@@ -79,5 +87,5 @@ variable "alert_types" {
     }
   }
 
-  description = "All of the Generic Alerts types that are the same for each of our systems"
+  description = "Map of alert types that apply to every system generically"
 }
