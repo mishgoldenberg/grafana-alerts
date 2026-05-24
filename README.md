@@ -1,162 +1,263 @@
-# Grafana Alert Rules Terraform Module
+<div align="center">
 
-## Contents
+# grafana-alerts
 
-1. [Overview](#overview)
-2. [File Structure](#file-structure)
-3. [Root Module](#root-module)
-4. [Module: generic_alerts](#module-generic_alerts)
-5. [Module: specific_alerts](#module-specific_alerts)
-6. [Key Concepts](#key-concepts)
-7. [How to Use](#how-to-use)
-8. [How to Get Query and Expression Strings](#how-to-get-query-and-expression-strings)
-9. [Extending the Module](#extending-the-module)
+**Terraform module that auto-generates Grafana alert rule groups for Linux and Windows servers from a single config file.**
 
----
+[![Terraform](https://img.shields.io/badge/Terraform-≥1.0-5C4EE5?logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Grafana Provider](https://img.shields.io/badge/hashicorp%2Fgrafana-4.1.0-F46800?logo=grafana&logoColor=white)](https://registry.terraform.io/providers/hashicorp/grafana/4.1.0)
+[![Backend](https://img.shields.io/badge/state-S3%20compatible-569A31?logo=amazons3&logoColor=white)](https://developer.hashicorp.com/terraform/language/backend/s3)
+[![PromQL](https://img.shields.io/badge/queries-PromQL-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/docs/prometheus/latest/querying/basics/)
 
-## Overview
-
-This Terraform module automates the creation of **Grafana alert rule groups** with multiple alert rules per system and server. It supports **Linux** and **Windows** systems, applies OS-specific PromQL queries, and handles conditional alert generation through per-server skip flags.
-
-Terraform state is stored remotely in an **S3-compatible object store** (e.g. MinIO, Ceph). Credentials and the Grafana connection are passed via environment variables — nothing sensitive is stored in `.tf` files or in state.
+</div>
 
 ---
 
-## File Structure
+## What is this?
+
+Setting up Grafana alert rules manually for dozens of servers is tedious and error-prone — every server needs the same six alerts configured individually through the UI. This module lets you declare your systems and servers in a single `terraform.tfvars` file and have Terraform create (or destroy) all the corresponding Grafana alert rule groups automatically.
+
+It supports **Linux and Windows** with OS-specific PromQL queries, lets you suppress specific alerts per server via skip flags, and handles custom system-specific alerts exported directly from the Grafana UI. State is stored remotely in any S3-compatible store (MinIO, Ceph, AWS S3) so the module is safe to use in a team environment.
+
+---
+
+## Features
+
+| | Feature |
+|---|---|
+| 🐧 🪟 | OS-specific PromQL queries for Linux and Windows |
+| 🔔 | Six built-in alert types per server: CPU, memory, storage, SSL cert, backup, and uptime |
+| 🚩 | Per-server skip flags to suppress alerts that don't apply (`skip_backup`, `skip_cert`, `skip_state`) |
+| 🔧 | Custom system-specific alerts via Grafana Terraform export — no module code changes needed |
+| 🔑 | Credentials via environment variables only — nothing sensitive in `.tf` files or state |
+| 🗄️ | Remote state in any S3-compatible object store |
+| ♻️ | Stable `for_each` keys — reordering systems in `tfvars` never triggers resource replacements |
+
+---
+
+## Architecture
 
 ```
-root/
-├── main.tf              # Backend, provider, and module calls
-├── variables.tf         # Root variable declarations
-└── terraform.tfvars     # Actual system/server values (fill this in)
-modules/
-├── generic_alerts/
-│   ├── main.tf          # grafana_rule_group with dynamic rules for all servers × alert types
-│   ├── variables.tf     # Inputs: servers (with skip flags), alert_types, folder_uid, etc.
-│   └── locals.tf        # PromQL queries, threshold expressions, filtered alert_rule_pairs
-└── specific_alerts/
-    ├── main.tf          # grafana_rule_group with dynamic rules for system-specific alerts
-    ├── variables.tf     # Inputs: specific_alert_types (pre-filtered to this system)
-    └── locals.tf        # Flattens specific_alert_types into a for_each-compatible map
+terraform.tfvars
+┌─────────────────────────────────────────────────┐
+│  systems        → list of systems + servers     │
+│  specific_alert_types → custom alert defs       │
+│  folder_uid, datasource_uid, contact_point_name │
+└────────────────────┬────────────────────────────┘
+                     │  for_each system
+          ┌──────────┴──────────┐
+          │                     │
+          ▼                     ▼
+  module/generic_alerts  module/specific_alerts
+  ───────────────────    ──────────────────────
+  cpu, memory, storage,  Custom alerts exported
+  cert_exp, backup,      from Grafana UI; keyed
+  state — OS-specific    by server or __system__
+  PromQL queries
+          │                     │
+          └──────────┬──────────┘
+                     │  grafana_rule_group (one per system per module)
+                     ▼
+           Grafana Alert Rules
+           ──────────────────
+           Routed to contact point
+           (Slack, email, PagerDuty…)
+```
+
+**How alert rules are built:**
+1. `locals.tf` in each module flattens `servers × alert_types` into a map keyed by `"ServerName|alert_key"`.
+2. Server skip flags are evaluated and matching pairs are filtered out.
+3. A single `grafana_rule_group` is created per system with a `dynamic "rule"` block — one rule per remaining pair.
+4. Each rule has two data blocks: **A** (PromQL query against Prometheus/Mimir) and **B** (threshold expression). The `__IP__` placeholder in query strings is replaced at apply-time with the server's real IP or URL.
+
+---
+
+## Quick Start
+
+**Prerequisites:** Terraform installed, Grafana reachable, Prometheus/Mimir datasource configured in Grafana.
+
+### 1. Clone the repo
+
+```bash
+git clone <repo-url>
+cd grafana-alerts
+```
+
+### 2. Configure the S3 backend
+
+Edit the `backend "s3"` block in [main.tf](main.tf) with your bucket details:
+
+```hcl
+backend "s3" {
+  bucket   = "my-terraform-state"
+  key      = "terraform.tfstate"
+  region   = "us-east-1"           # any value for non-AWS stores
+  endpoint = "https://minio.example.com"
+  skip_credentials_validation = true
+  skip_region_validation      = true
+  skip_requesting_account_id  = true
+  force_path_style            = true
+}
+```
+
+### 3. Fill in `terraform.tfvars`
+
+```hcl
+folder_uid         = "<grafana-folder-uid>"
+datasource_uid     = "<prometheus-datasource-uid>"
+contact_point_name = "slack-ops"
+
+systems = [
+  {
+    system_name = "My App"
+    os          = "linux"
+    servers = [
+      {
+        name        = "app-prod-01"
+        ip          = "10.0.0.1:9100"
+        url         = "https://myapp.example.com"
+        skip_backup = false
+        skip_cert   = false
+        skip_state  = false
+      }
+    ]
+  }
+]
+```
+
+### 4. Export credentials as environment variables
+
+```bash
+export GRAFANA_URL="https://grafana.example.com"
+export GRAFANA_AUTH="<service-account-token>"
+export AWS_ACCESS_KEY_ID="<s3-access-key>"
+export AWS_SECRET_ACCESS_KEY="<s3-secret-key>"
+```
+
+### 5. Apply
+
+```bash
+terraform init
+terraform plan
+terraform apply
 ```
 
 ---
 
-## Root Module
+## Configuration Reference
 
-### main.tf
+### Root variables (`variables.tf`)
 
-- Configures the **S3 backend** for remote state storage. Bucket, region, and endpoint are set here; credentials flow in from environment variables `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. The `skip_*` flags and `force_path_style = true` are required for non-AWS S3-compatible stores.
-- Configures the **Grafana provider** via `GRAFANA_URL` and `GRAFANA_AUTH` environment variables.
-- Calls `generic_alerts` once per system (excluding the example placeholder), using `system_name` as the `for_each` key so reordering entries in `terraform.tfvars` doesn't trigger resource replacements.
-- Calls `specific_alerts` only for systems that have entries in `specific_alert_types`, passing only that system's slice of the map.
+| Variable | Type | Required | Description |
+|---|---|---|---|
+| `systems` | `list(object)` | Yes | Systems and their servers (see below) |
+| `folder_uid` | `string` | Yes | UID of the Grafana folder to create alerts in |
+| `datasource_uid` | `string` | Yes | UID of the Prometheus/Mimir datasource |
+| `contact_point_name` | `string` | Yes | Grafana contact point for all notifications |
+| `specific_alert_types` | `map(map(map))` | No | Custom per-system alerts (default: `{}`) |
 
-### variables.tf
+### Server object fields
 
-- `systems` — list of system objects, each with an OS type and servers (including optional skip flags).
-- `folder_uid` — Grafana folder where all alert groups are created.
-- `datasource_uid` — Grafana datasource UID (Prometheus/Mimir).
-- `contact_point_name` — Grafana contact point for all notifications.
-- `specific_alert_types` — optional nested map for system-specific alerts; defaults to empty.
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | `string` | — | Display name; used in alert rule titles and the `instance` label |
+| `ip` | `string` | — | `host:port` used as the Prometheus `instance` label (e.g. `10.0.0.1:9100`) |
+| `url` | `string` | — | Full URL used by Blackbox exporter for `cert_exp` and `state` checks |
+| `skip_backup` | `bool` | `false` | Suppress the backup alert for this server |
+| `skip_cert` | `bool` | `false` | Suppress the SSL certificate expiry alert |
+| `skip_state` | `bool` | `false` | Suppress the uptime/state alert |
 
-### terraform.tfvars
+### Environment variables
 
-Provides real values for all variables. This is the primary file to edit when adding a new system or server.
+| Variable | Used by | Description |
+|---|---|---|
+| `GRAFANA_URL` | Grafana provider | Base URL of your Grafana instance |
+| `GRAFANA_AUTH` | Grafana provider | Service account token |
+| `AWS_ACCESS_KEY_ID` | S3 backend | Access key for remote state storage |
+| `AWS_SECRET_ACCESS_KEY` | S3 backend | Secret key for remote state storage |
 
----
+### Built-in alert types (generic_alerts)
 
-## Module: generic_alerts
-
-Manages the standard set of alerts (cpu, memory, storage, cert_exp, backup, state) that apply to every system. A single `grafana_rule_group` is created per system call, containing one rule per server × alert type combination after filtering.
-
-### variables.tf
-
-Key inputs:
-- `servers` — each server object supports three optional boolean flags:
-  - `skip_backup` — suppress backup alert for this server (default: `false`)
-  - `skip_cert` — suppress certificate expiry alert (default: `false`)
-  - `skip_state` — suppress uptime/state alert (default: `false`)
-- `folder_uid` — the target Grafana folder.
-- `alert_types` — map of alert configs with a sensible default covering all six alert types.
-
-### locals.tf
-
-- **`alert_rule_pairs`** — flattens every server × alert type combination into a single map keyed by `"ServerName|alert_key"`, then filters out pairs where the server's skip flag is set.
-- **`queries`** — two-level map (`os → alert_key → JSON string`) containing the PromQL query for each alert. The server's address is represented by the placeholder `__IP__`, which is replaced at apply-time.
-- **`exprs`** — map of threshold expressions (`alert_key → JSON string`) used as the condition in data block B.
-
-### main.tf
-
-- Creates a `grafana_rule_group` with a `dynamic "rule"` block iterating over `local.alert_rule_pairs`.
-- For `cert_exp` and `state` alerts, `__IP__` is replaced with `server.url` (Blackbox exporter targets a URL). All other alerts replace `__IP__` with `server.ip`.
-- Each rule has two data blocks: A (PromQL query) and B (threshold expression), with `condition = "B"`.
+| Alert key | Severity | Trigger condition | Query target |
+|---|---|---|---|
+| `cpu` | High | CPU usage > 95% | `server.ip` |
+| `memory` | Critical | Memory usage > 95% | `server.ip` |
+| `storage` | Critical | Disk usage > 95% | `server.ip` |
+| `cert_exp` | High | SSL cert expires in < 14 days | `server.url` |
+| `backup` | High | Backup failed or not running | `server.ip` |
+| `state` | Critical | Server/service is down | `server.url` |
 
 ---
 
-## Module: specific_alerts
+## Project Structure
 
-Handles alerts that are unique to a particular system and don't fit the generic pattern — for example, monitoring a specific Windows service, a custom application metric, or a non-standard port check.
-
-### How it works
-
-- The root passes `var.specific_alert_types[system_name]` — only this system's entries — so the module has a clean, minimal interface.
-- `locals.tf` flattens the two-level map (`server_name → alert_key → config`) into the same `"ServerName|alert_key"` map shape used by `generic_alerts`.
-- Use `"__system__"` as the server key for alerts that apply to the system as a whole rather than a specific server. The alert's `instance` label will be set to the system name.
-- Each alert config includes `query` and `expr` — full JSON strings from Grafana's Terraform export. The `__IP__` placeholder in `query` is replaced with `server.ip` at apply-time.
-
----
-
-## Key Concepts
-
-- **Dynamic blocks** — generate multiple alert rules per system without repeating code.
-- **Per-server skip flags** — `skip_backup`, `skip_cert`, `skip_state` on each server object control which alerts are created, without touching module internals.
-- **Stable `for_each` keys** — both module calls use `system_name` as the map key instead of the list index, so reordering systems in `terraform.tfvars` won't cause unintended resource replacements.
-- **`__IP__` placeholder** — all PromQL query strings use `__IP__` where the server address goes. Terraform replaces it with the real IP (or URL) at apply-time. This avoids accidental substring matches that a bare `ip` placeholder could cause.
-- **Pre-filtered specific alerts** — the root passes only `specific_alert_types[system_name]` to the `specific_alerts` module, keeping the module interface simple and the plan output clean.
-- **Remote state via S3** — `terraform.tfstate` is stored in an S3-compatible bucket. No local state files are committed to the repository.
+```
+grafana-alerts/
+├── main.tf                   # S3 backend, Grafana provider, module calls
+├── variables.tf              # Root input variable definitions
+├── terraform.tfvars          # Your systems, servers, and UIDs (edit this)
+└── modules/
+    ├── generic_alerts/       # Standard 6-alert set for all systems
+    │   ├── main.tf           # grafana_rule_group with dynamic rule blocks
+    │   ├── variables.tf      # Inputs: servers, skip flags, folder/datasource UIDs
+    │   └── locals.tf         # PromQL queries (per OS), threshold exprs, alert_rule_pairs
+    └── specific_alerts/      # System-specific custom alerts
+        ├── main.tf           # grafana_rule_group for custom alerts
+        ├── variables.tf      # Inputs: specific_alert_types (pre-filtered to this system)
+        └── locals.tf         # Flattens server × alert map into for_each-compatible map
+```
 
 ---
 
-## How to Use
+## Customisation
 
-1. Fill in `terraform.tfvars` with your systems, servers, folder UID, datasource UID, and contact point name.
-2. Set environment variables before running Terraform:
-   ```bash
-   export GRAFANA_URL="https://grafana.example.com"
-   export GRAFANA_AUTH="<service-account-token>"
-   export AWS_ACCESS_KEY_ID="<s3-access-key>"
-   export AWS_SECRET_ACCESS_KEY="<s3-secret-key>"
-   ```
-3. Update the `backend "s3"` block in `main.tf` with your bucket name, region, and endpoint.
-4. Run:
-   ```bash
-   terraform init
-   terraform plan
-   terraform apply
-   ```
+### Suppress an alert for one server
+
+Add the skip flag to the server object in `terraform.tfvars` — no module changes needed:
+
+```hcl
+{ name = "db-backup-01", ip = "10.0.0.5:9100", url = "https://db.example.com", skip_backup = true }
+```
+
+### Add a system-specific (custom) alert
+
+1. **Create the alert manually in Grafana UI** with the correct PromQL query and threshold.
+2. Open the rule → `...` menu → **Export → Export as Terraform HCL**.
+3. Copy the two `model` JSON strings:
+   - `ref_id = "A"` → this is your `query`
+   - `ref_id = "B"` (datasource `"__expr__"`) → this is your `expr`
+4. In the `query` string, replace the server's IP/URL with the placeholder `__IP__`.
+5. Add the entry to `specific_alert_types` in `terraform.tfvars`:
+
+```hcl
+specific_alert_types = {
+  "My App" = {
+    "app-prod-01" = {
+      windows_service_check = {
+        display_name = "Critical Service Down"
+        description  = "The MyApp Windows service has stopped."
+        summary      = "MyApp service is not running on __IP__"
+        severity     = "Critical"
+        query        = "<JSON from ref_id A, __IP__ substituted>"
+        expr         = "<JSON from ref_id B>"
+      }
+    }
+    # Use "__system__" as the key for alerts that don't map to a specific server
+    "__system__" = {
+      db_replication_lag = { ... }
+    }
+  }
+}
+```
+
+### Add a new generic alert type
+
+1. Add a key to the `alert_types` default map in [modules/generic_alerts/variables.tf](modules/generic_alerts/variables.tf).
+2. Add matching `queries["linux"]["new_key"]` and `queries["windows"]["new_key"]` entries in [modules/generic_alerts/locals.tf](modules/generic_alerts/locals.tf).
+3. Add the threshold `exprs["new_key"]` entry in the same file.
 
 ---
 
-## How to Get Query and Expression Strings
+## License
 
-The `query` and `expr` values in `specific_alert_types` (and the base queries in `generic_alerts/locals.tf`) are JSON strings that Grafana uses internally to describe a data query and a threshold expression. The easiest way to get them is to export an existing alert from Grafana:
-
-1. **Create the alert manually in Grafana UI** — set up the alert rule exactly as you want it, with the correct PromQL query and threshold.
-2. **Open the alert rule** — go to Alerting → Alert rules and open the rule you just created.
-3. **Export as Terraform** — click the `...` menu on the rule, then choose **Export → Export as Terraform HCL**.
-4. **Copy the `model` fields** — in the exported HCL, each `data` block has a `model` attribute containing a JSON string:
-   - The first `data` block (`ref_id = "A"`) — this is your `query` value.
-   - The second `data` block (`ref_id = "B"`, `datasource_uid = "__expr__"`) — this is your `expr` value.
-5. **Replace the instance value** — in the `query` string, find the `instance` label value (it will be your server's actual IP or URL) and replace it with `__IP__`. This module will substitute the real value at apply-time.
-6. **Paste into `terraform.tfvars`** — add the strings under the appropriate system/server keys in `specific_alert_types`.
-
-> The same process was used to build the base queries in `generic_alerts/locals.tf` — one alert per type was created manually, exported, and the instance value was replaced with `__IP__`.
-
----
-
-## Extending the Module
-
-- **Add a generic alert type** — add a new key to the `alert_types` default in `generic_alerts/variables.tf`, add matching `query` entries for both `linux` and `windows` in `generic_alerts/locals.tf`, and add the threshold `expr` entry in the same file.
-- **Add a system-specific alert** — add an entry under `specific_alert_types` in `terraform.tfvars` following the existing example. No module code changes needed.
-- **Add a new system** — add a new object to the `systems` list in `terraform.tfvars`.
-- **Export alert group IDs** — add an `outputs.tf` file at the root if you need to reference the created alert group UIDs elsewhere.
+No license file is present in this repository. All rights reserved by the author unless stated otherwise.
