@@ -23,3 +23,6 @@ override.tf.json
 # CLI configuration files
 .terraformrc
 terraform.rc
+
+# Claude Code
+.claude/
