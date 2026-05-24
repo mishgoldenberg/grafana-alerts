@@ -260,4 +260,4 @@ specific_alert_types = {
 
 ## License
 
-No license file is present in this repository. All rights reserved by the author unless stated otherwise.
+[MIT](LICENSE) © 2026 Michael Goldenberg
