@@ -1,13 +1,14 @@
 <div align="center">
 
-# grafana-alerts
+# 🔔 Grafana Alert Rules
 
-**Terraform module that auto-generates Grafana alert rule groups for Linux and Windows servers from a single config file.**
+**Terraform module that auto-generates Grafana alert rule groups for Linux and Windows servers — from a single config file.**
 
-[![Terraform](https://img.shields.io/badge/Terraform-≥1.0-5C4EE5?logo=terraform&logoColor=white)](https://www.terraform.io/)
-[![Grafana Provider](https://img.shields.io/badge/hashicorp%2Fgrafana-4.1.0-F46800?logo=grafana&logoColor=white)](https://registry.terraform.io/providers/hashicorp/grafana/4.1.0)
-[![Backend](https://img.shields.io/badge/state-S3%20compatible-569A31?logo=amazons3&logoColor=white)](https://developer.hashicorp.com/terraform/language/backend/s3)
-[![PromQL](https://img.shields.io/badge/queries-PromQL-E6522C?logo=prometheus&logoColor=white)](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+[![Terraform](https://img.shields.io/badge/Terraform-≥1.0-5C4EE5?style=for-the-badge&logo=terraform&logoColor=white)](https://www.terraform.io/)
+[![Grafana Provider](https://img.shields.io/badge/Grafana_Provider-4.1.0-F46800?style=for-the-badge&logo=grafana&logoColor=white)](https://registry.terraform.io/providers/hashicorp/grafana/4.1.0)
+[![Backend](https://img.shields.io/badge/Backend-S3_Compatible-569A31?style=for-the-badge&logo=amazons3&logoColor=white)](https://developer.hashicorp.com/terraform/language/backend/s3)
+[![PromQL](https://img.shields.io/badge/Queries-PromQL-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/docs/prometheus/latest/querying/basics/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -21,62 +22,60 @@ It supports **Linux and Windows** with OS-specific PromQL queries, lets you supp
 
 ---
 
-## Features
+## ✨ Features
 
-| | Feature |
+| | |
 |---|---|
-| 🐧 🪟 | OS-specific PromQL queries for Linux and Windows |
-| 🔔 | Six built-in alert types per server: CPU, memory, storage, SSL cert, backup, and uptime |
-| 🚩 | Per-server skip flags to suppress alerts that don't apply (`skip_backup`, `skip_cert`, `skip_state`) |
-| 🔧 | Custom system-specific alerts via Grafana Terraform export — no module code changes needed |
-| 🔑 | Credentials via environment variables only — nothing sensitive in `.tf` files or state |
-| 🗄️ | Remote state in any S3-compatible object store |
-| ♻️ | Stable `for_each` keys — reordering systems in `tfvars` never triggers resource replacements |
+| 🐧 🪟 **Cross-platform** | OS-specific PromQL queries for both Linux and Windows servers |
+| 🔔 **Six built-in alerts** | CPU, memory, storage, SSL cert expiry, backup, and uptime — per server |
+| 🚩 **Per-server skip flags** | Suppress alerts that don't apply without touching module internals |
+| 🔧 **Custom alerts** | Add system-specific alerts via Grafana Terraform export — no module changes needed |
+| 🔑 **Credentials via env vars** | Nothing sensitive in `.tf` files or state |
+| 🗄️ **Remote state** | Terraform state stored in any S3-compatible object store |
+| ♻️ **Stable keys** | `system_name`-keyed `for_each` — reordering systems never triggers replacements |
 
 ---
 
-## Architecture
+## 🏗️ How it works
 
 ```
 terraform.tfvars
-┌─────────────────────────────────────────────────┐
-│  systems        → list of systems + servers     │
-│  specific_alert_types → custom alert defs       │
-│  folder_uid, datasource_uid, contact_point_name │
-└────────────────────┬────────────────────────────┘
-                     │  for_each system
-          ┌──────────┴──────────┐
-          │                     │
-          ▼                     ▼
-  module/generic_alerts  module/specific_alerts
-  ───────────────────    ──────────────────────
-  cpu, memory, storage,  Custom alerts exported
-  cert_exp, backup,      from Grafana UI; keyed
-  state — OS-specific    by server or __system__
-  PromQL queries
-          │                     │
-          └──────────┬──────────┘
-                     │  grafana_rule_group (one per system per module)
-                     ▼
-           Grafana Alert Rules
-           ──────────────────
-           Routed to contact point
-           (Slack, email, PagerDuty…)
+       │
+       ├── systems (list of systems + servers)
+       ├── specific_alert_types (custom alert defs)
+       └── folder_uid, datasource_uid, contact_point_name
+       │
+       │  for_each system
+       ├──────────────────────────────────┐
+       ▼                                  ▼
+module/generic_alerts            module/specific_alerts
+─────────────────────            ──────────────────────
+cpu, memory, storage,            Custom alerts exported
+cert_exp, backup, state          from Grafana UI; keyed
+with OS-specific PromQL          by server or __system__
+       │                                  │
+       └──────────────┬───────────────────┘
+                      │  grafana_rule_group (one per system per module)
+                      ▼
+            Grafana Alert Rules
+            ─────────────────────────────
+            Routed to contact point
+            (Slack, email, PagerDuty…)
 ```
 
-**How alert rules are built:**
-1. `locals.tf` in each module flattens `servers × alert_types` into a map keyed by `"ServerName|alert_key"`.
-2. Server skip flags are evaluated and matching pairs are filtered out.
-3. A single `grafana_rule_group` is created per system with a `dynamic "rule"` block — one rule per remaining pair.
-4. Each rule has two data blocks: **A** (PromQL query against Prometheus/Mimir) and **B** (threshold expression). The `__IP__` placeholder in query strings is replaced at apply-time with the server's real IP or URL.
+**How rules are built:**
+1. Each module's `locals.tf` flattens `servers × alert_types` into a map keyed by `"ServerName|alert_key"`.
+2. Per-server skip flags are evaluated and matching pairs are filtered out.
+3. A single `grafana_rule_group` is created per system using a `dynamic "rule"` block.
+4. Each rule has two data blocks: **A** (PromQL query) and **B** (threshold expression). The `__IP__` placeholder is replaced at apply-time with the server's real IP or URL.
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 **Prerequisites:** Terraform installed, Grafana reachable, Prometheus/Mimir datasource configured in Grafana.
 
-### 1. Clone the repo
+### 1. Clone
 
 ```bash
 git clone <repo-url>
@@ -85,7 +84,7 @@ cd grafana-alerts
 
 ### 2. Configure the S3 backend
 
-Edit the `backend "s3"` block in [main.tf](main.tf) with your bucket details:
+Edit the `backend "s3"` block in [main.tf](main.tf):
 
 ```hcl
 backend "s3" {
@@ -125,7 +124,7 @@ systems = [
 ]
 ```
 
-### 4. Export credentials as environment variables
+### 4. Set environment variables
 
 ```bash
 export GRAFANA_URL="https://grafana.example.com"
@@ -144,41 +143,41 @@ terraform apply
 
 ---
 
-## Configuration Reference
+## ⚙️ Configuration Reference
 
-### Root variables (`variables.tf`)
+### Root variables
 
-| Variable | Type | Required | Description |
-|---|---|---|---|
-| `systems` | `list(object)` | Yes | Systems and their servers (see below) |
-| `folder_uid` | `string` | Yes | UID of the Grafana folder to create alerts in |
-| `datasource_uid` | `string` | Yes | UID of the Prometheus/Mimir datasource |
-| `contact_point_name` | `string` | Yes | Grafana contact point for all notifications |
-| `specific_alert_types` | `map(map(map))` | No | Custom per-system alerts (default: `{}`) |
+| Variable | Required | Description |
+|---|:---:|---|
+| `systems` | ✅ | List of systems and their servers (see server fields below) |
+| `folder_uid` | ✅ | UID of the Grafana folder to create alerts in |
+| `datasource_uid` | ✅ | UID of the Prometheus/Mimir datasource |
+| `contact_point_name` | ✅ | Grafana contact point for all notifications |
+| `specific_alert_types` | | Custom per-system alerts (default: `{}`) |
 
 ### Server object fields
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `name` | `string` | — | Display name; used in alert rule titles and the `instance` label |
-| `ip` | `string` | — | `host:port` used as the Prometheus `instance` label (e.g. `10.0.0.1:9100`) |
-| `url` | `string` | — | Full URL used by Blackbox exporter for `cert_exp` and `state` checks |
-| `skip_backup` | `bool` | `false` | Suppress the backup alert for this server |
-| `skip_cert` | `bool` | `false` | Suppress the SSL certificate expiry alert |
-| `skip_state` | `bool` | `false` | Suppress the uptime/state alert |
+| Field | Required | Description |
+|---|:---:|---|
+| `name` | ✅ | Display name — used in alert rule titles and the `instance` label |
+| `ip` | ✅ | `host:port` for the Prometheus `instance` label (e.g. `10.0.0.1:9100`) |
+| `url` | ✅ | Full URL for Blackbox exporter `cert_exp` and `state` checks |
+| `skip_backup` | | Suppress the backup alert for this server (default: `false`) |
+| `skip_cert` | | Suppress the SSL certificate expiry alert (default: `false`) |
+| `skip_state` | | Suppress the uptime/state alert (default: `false`) |
 
 ### Environment variables
 
-| Variable | Used by | Description |
-|---|---|---|
-| `GRAFANA_URL` | Grafana provider | Base URL of your Grafana instance |
-| `GRAFANA_AUTH` | Grafana provider | Service account token |
-| `AWS_ACCESS_KEY_ID` | S3 backend | Access key for remote state storage |
-| `AWS_SECRET_ACCESS_KEY` | S3 backend | Secret key for remote state storage |
+| Variable | Required | Description |
+|---|:---:|---|
+| `GRAFANA_URL` | ✅ | Base URL of your Grafana instance |
+| `GRAFANA_AUTH` | ✅ | Grafana service account token |
+| `AWS_ACCESS_KEY_ID` | ✅ | Access key for S3 remote state |
+| `AWS_SECRET_ACCESS_KEY` | ✅ | Secret key for S3 remote state |
 
-### Built-in alert types (generic_alerts)
+### Built-in alert types
 
-| Alert key | Severity | Trigger condition | Query target |
+| Alert | Severity | Trigger | Query target |
 |---|---|---|---|
 | `cpu` | High | CPU usage > 95% | `server.ip` |
 | `memory` | Critical | Memory usage > 95% | `server.ip` |
@@ -189,7 +188,7 @@ terraform apply
 
 ---
 
-## Project Structure
+## 🗂️ Project Structure
 
 ```
 grafana-alerts/
@@ -209,24 +208,20 @@ grafana-alerts/
 
 ---
 
-## Customisation
+## 🔧 Customisation
 
-### Suppress an alert for one server
-
-Add the skip flag to the server object in `terraform.tfvars` — no module changes needed:
+**Suppress an alert for one server** — add the skip flag in `terraform.tfvars`, no module changes needed:
 
 ```hcl
-{ name = "db-backup-01", ip = "10.0.0.5:9100", url = "https://db.example.com", skip_backup = true }
+{ name = "db-01", ip = "10.0.0.5:9100", url = "https://db.example.com", skip_backup = true }
 ```
 
-### Add a system-specific (custom) alert
+**Add a system-specific alert:**
 
-1. **Create the alert manually in Grafana UI** with the correct PromQL query and threshold.
+1. Create the alert manually in the Grafana UI with the correct PromQL query and threshold.
 2. Open the rule → `...` menu → **Export → Export as Terraform HCL**.
-3. Copy the two `model` JSON strings:
-   - `ref_id = "A"` → this is your `query`
-   - `ref_id = "B"` (datasource `"__expr__"`) → this is your `expr`
-4. In the `query` string, replace the server's IP/URL with the placeholder `__IP__`.
+3. Copy the two `model` JSON strings — `ref_id = "A"` is your `query`, `ref_id = "B"` is your `expr`.
+4. Replace the server's IP/URL in the `query` string with `__IP__`.
 5. Add the entry to `specific_alert_types` in `terraform.tfvars`:
 
 ```hcl
@@ -242,22 +237,16 @@ specific_alert_types = {
         expr         = "<JSON from ref_id B>"
       }
     }
-    # Use "__system__" as the key for alerts that don't map to a specific server
-    "__system__" = {
-      db_replication_lag = { ... }
-    }
+    # Use "__system__" for alerts that don't map to a specific server
+    "__system__" = { ... }
   }
 }
 ```
 
-### Add a new generic alert type
-
-1. Add a key to the `alert_types` default map in [modules/generic_alerts/variables.tf](modules/generic_alerts/variables.tf).
-2. Add matching `queries["linux"]["new_key"]` and `queries["windows"]["new_key"]` entries in [modules/generic_alerts/locals.tf](modules/generic_alerts/locals.tf).
-3. Add the threshold `exprs["new_key"]` entry in the same file.
+**Add a new generic alert type** — add a key to `alert_types` in [modules/generic_alerts/variables.tf](modules/generic_alerts/variables.tf), then add matching `queries["linux"]`, `queries["windows"]`, and `exprs` entries in [modules/generic_alerts/locals.tf](modules/generic_alerts/locals.tf).
 
 ---
 
-## License
+## 📄 License
 
 [MIT](LICENSE) © 2026 Michael Goldenberg
