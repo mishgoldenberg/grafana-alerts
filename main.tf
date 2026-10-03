@@ -8,7 +8,7 @@
 terraform {
   required_providers {
     grafana = {
-      source  = "hashicorp/grafana"
+      source  = "grafana/grafana"
       version = "4.1.0"
     }
   }

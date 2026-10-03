@@ -5,7 +5,7 @@
 **Terraform module that auto-generates Grafana alert rule groups for Linux and Windows servers — from a single config file.**
 
 [![Terraform](https://img.shields.io/badge/Terraform-≥1.0-5C4EE5?style=for-the-badge&logo=terraform&logoColor=white)](https://www.terraform.io/)
-[![Grafana Provider](https://img.shields.io/badge/Grafana_Provider-4.1.0-F46800?style=for-the-badge&logo=grafana&logoColor=white)](https://registry.terraform.io/providers/hashicorp/grafana/4.1.0)
+[![Grafana Provider](https://img.shields.io/badge/Grafana_Provider-4.1.0-F46800?style=for-the-badge&logo=grafana&logoColor=white)](https://registry.terraform.io/providers/grafana/grafana/4.1.0)
 [![Backend](https://img.shields.io/badge/Backend-S3_Compatible-569A31?style=for-the-badge&logo=amazons3&logoColor=white)](https://developer.hashicorp.com/terraform/language/backend/s3)
 [![PromQL](https://img.shields.io/badge/Queries-PromQL-E6522C?style=for-the-badge&logo=prometheus&logoColor=white)](https://prometheus.io/docs/prometheus/latest/querying/basics/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](LICENSE)
@@ -199,11 +199,13 @@ grafana-alerts/
     ├── generic_alerts/       # Standard 6-alert set for all systems
     │   ├── main.tf           # grafana_rule_group with dynamic rule blocks
     │   ├── variables.tf      # Inputs: servers, skip flags, folder/datasource UIDs
-    │   └── locals.tf         # PromQL queries (per OS), threshold exprs, alert_rule_pairs
+    │   ├── locals.tf         # PromQL queries (per OS), threshold exprs, alert_rule_pairs
+    │   └── versions.tf       # Provider source (grafana/grafana)
     └── specific_alerts/      # System-specific custom alerts
         ├── main.tf           # grafana_rule_group for custom alerts
         ├── variables.tf      # Inputs: specific_alert_types (pre-filtered to this system)
-        └── locals.tf         # Flattens server × alert map into for_each-compatible map
+        ├── locals.tf         # Flattens server × alert map into for_each-compatible map
+        └── versions.tf       # Provider source (grafana/grafana)
 ```
 
 ---
